@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/components/common/GameCover.tsx",
+    "src/components/duel/*",
+    "src/components/export/*",
+    "src/components/game/*",
+    "src/components/layout/Header.tsx",
+    "src/components/layout/BottomNav.tsx",
+    "src/components/ranking/*",
+    "src/components/recommendations/*",
+    "src/components/settings/SettingsModal.tsx",
+    "src/components/stats/*",
+    "src/components/sync/*",
+    "src/data/*",
+    "src/services/*",
+    "src/types/game.ts",
+    "src/utils/audio.ts",
+    "src/utils/binarySearchDuel.ts"
+  ]
+}

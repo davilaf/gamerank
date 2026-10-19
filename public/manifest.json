@@ -1,0 +1,19 @@
+{
+  "name": "GameRank - Ranking & Duelos de Videojuegos",
+  "short_name": "GameRank",
+  "description": "Tu ranking personal de videojuegos terminados, duelos 1v1 y motor de recomendaciones.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#060913",
+  "theme_color": "#060913",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
