@@ -60,17 +60,43 @@ export function App() {
 
     // Conectar y sincronizar con la nube
     const syncCode = getSyncCode();
+    const localLastModified = storageService.getLastModified();
+
     setIsCloudSyncing(true);
     pullGamesFromCloud(syncCode)
       .then((res) => {
         setIsCloudSyncing(false);
         if (res.success && res.games && res.games.length > 0) {
-          const normalized = storageService.normalizeRanks(res.games);
-          setGames(normalized);
-          storageService.saveGames(normalized);
-          showToast('☁️ Sincronizado con la nube');
+          const cloudTime = res.timestamp ? new Date(res.timestamp).getTime() : 0;
+          const localTime = localLastModified ? new Date(localLastModified).getTime() : 0;
+
+          // Comprobar si los juegos locales de este dispositivo tienen cambios únicos
+          const hasLocalModifications =
+            loaded.length !== res.games.length ||
+            loaded.some((lg, idx) => {
+              const rg = res.games![idx];
+              return (
+                !rg ||
+                lg.id !== rg.id ||
+                lg.title !== rg.title ||
+                (lg.notes && lg.notes !== rg.notes) ||
+                (lg.coverUrl && lg.coverUrl !== rg.coverUrl)
+              );
+            });
+
+          // Si este dispositivo tiene cambios más recientes o modificaciones únicas,
+          // CONSERVAR los cambios locales y subirlos a la nube (así nunca se pierden los cambios del móvil)
+          if ((localTime > cloudTime && hasLocalModifications) || (localTime > 0 && hasLocalModifications && cloudTime === 0)) {
+            pushGamesToCloud(loaded, syncCode);
+            showToast('📱 Se conservaron y subieron a la nube los cambios de tu dispositivo');
+          } else {
+            const normalized = storageService.normalizeRanks(res.games);
+            setGames(normalized);
+            storageService.saveGames(normalized, false);
+            showToast('☁️ Sincronizado con la nube');
+          }
         } else if (res.success && !res.games && loaded.length > 0) {
-          // Si la nube aún no tiene datos, subir la lista inicial
+          // Si la nube aún no tiene datos, subir la lista actual
           pushGamesToCloud(loaded, syncCode);
         }
       })

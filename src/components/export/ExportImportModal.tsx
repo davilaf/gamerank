@@ -154,7 +154,7 @@ export function ExportImportModal({
                       Exportar a Microsoft Excel (.xlsx)
                     </h4>
                     <p className="text-xs text-slate-400">
-                      Incluye puesto, tier, título, plataformas, géneros y notas en tabla estilizada.
+                      Incluye puesto, tier, título, plataformas, géneros, notas y enlaces de carátulas.
                     </p>
                   </div>
                 </div>
@@ -176,7 +176,7 @@ export function ExportImportModal({
                       Exportar a CSV (Compatible Excel & Google Sheets)
                     </h4>
                     <p className="text-xs text-slate-400">
-                      Formato delimitado con codificación UTF-8 con BOM.
+                      Formato delimitado con codificación UTF-8 con BOM y carátulas.
                     </p>
                   </div>
                 </div>
@@ -187,18 +187,21 @@ export function ExportImportModal({
               <button
                 type="button"
                 onClick={handleExportJSON}
-                className="w-full p-4 rounded-xl bg-slate-950 hover:bg-purple-950/20 border border-slate-800 hover:border-purple-500/50 flex items-center justify-between transition-all group cursor-pointer"
+                className="w-full p-4 rounded-xl bg-slate-950 hover:bg-purple-950/20 border border-slate-800 hover:border-purple-500/50 flex items-center justify-between transition-all group cursor-pointer ring-1 ring-purple-500/30"
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 group-hover:scale-105 transition-transform">
                     <FileCode className="w-6 h-6" />
                   </div>
                   <div className="text-left">
-                    <h4 className="font-bold text-white group-hover:text-purple-300">
-                      Copia de Seguridad Completa (.json)
+                    <h4 className="font-bold text-white group-hover:text-purple-300 flex items-center gap-2">
+                      <span>Copia de Seguridad Completa (.json)</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold">
+                        Recomendado
+                      </span>
                     </h4>
                     <p className="text-xs text-slate-400">
-                      Ideal para migrar o restaurar todos tus datos intactos.
+                      Guarda el 100% de tus datos: ranking, todas las carátulas, notas, plataformas y géneros.
                     </p>
                   </div>
                 </div>

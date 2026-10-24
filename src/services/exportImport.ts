@@ -1,10 +1,18 @@
 import * as XLSX from 'xlsx';
 import { Game } from '../types/game';
 import { getTierForRank } from '../data/seedGames';
+import { getCoverUrlForTitle } from './covers';
+
+export interface GameRankBackupPayload {
+  version: string;
+  exportDate: string;
+  totalGames: number;
+  games: Game[];
+}
 
 export const exportImportService = {
   /**
-   * Exporta la lista actual a un archivo Excel (.xlsx) con columnas formateadas y diseño limpio.
+   * Exporta la lista actual a un archivo Excel (.xlsx) con todas las columnas, incluyendo carátulas y diseño limpio.
    */
   exportToExcel(games: Game[], filename = 'GameRank_Mis_Videojuegos.xlsx'): void {
     const rows = games.map((game) => {
@@ -13,9 +21,10 @@ export const exportImportService = {
         Puesto: game.rank,
         Tier: `${tier.level} - ${tier.label}`,
         Título: game.title,
-        Plataforma: game.platform || '',
+        Plataforma: game.platform || 'Multiplataforma',
         Géneros: game.genres.join(', '),
         Notas: game.notes || '',
+        'Carátula (URL)': game.coverUrl || getCoverUrlForTitle(game.title) || '',
         'Fecha Terminado': game.finishedDate || '',
       };
     });
@@ -25,12 +34,13 @@ export const exportImportService = {
     // Ajustar anchos de columna automáticos
     worksheet['!cols'] = [
       { wch: 8 },  // Puesto
-      { wch: 22 }, // Tier
+      { wch: 20 }, // Tier
       { wch: 38 }, // Título
       { wch: 28 }, // Plataforma
       { wch: 35 }, // Géneros
       { wch: 55 }, // Notas
-      { wch: 15 }, // Fecha
+      { wch: 60 }, // Carátula (URL)
+      { wch: 16 }, // Fecha
     ];
 
     const workbook = XLSX.utils.book_new();
@@ -40,14 +50,14 @@ export const exportImportService = {
   },
 
   /**
-   * Exporta a archivo CSV con BOM UTF-8 para compatibilidad universal con Excel y Google Sheets.
+   * Exporta a archivo CSV con BOM UTF-8 y columna de carátula para compatibilidad universal con Excel y Google Sheets.
    */
   exportToCSV(games: Game[], filename = 'GameRank_Mis_Videojuegos.csv'): void {
-    const headers = ['Puesto', 'Tier', 'Titulo', 'Plataforma', 'Generos', 'Notas', 'Fecha_Terminado'];
+    const headers = ['Puesto', 'Tier', 'Titulo', 'Plataforma', 'Generos', 'Notas', 'Caratula_URL', 'Fecha_Terminado'];
 
     const escapeCsv = (str: string | number) => {
       const stringValue = String(str ?? '');
-      if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+      if (stringValue.includes(';') || stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
         return `"${stringValue.replace(/"/g, '""')}"`;
       }
       return stringValue;
@@ -57,13 +67,15 @@ export const exportImportService = {
       headers.join(';'), // Punto y coma habitual en Excel en español
       ...games.map((game) => {
         const tier = getTierForRank(game.rank);
+        const cover = game.coverUrl || getCoverUrlForTitle(game.title) || '';
         return [
           game.rank,
           escapeCsv(tier.level),
           escapeCsv(game.title),
-          escapeCsv(game.platform || ''),
+          escapeCsv(game.platform || 'Multiplataforma'),
           escapeCsv(game.genres.join(', ')),
           escapeCsv(game.notes || ''),
+          escapeCsv(cover),
           escapeCsv(game.finishedDate || ''),
         ].join(';');
       }),
@@ -82,10 +94,20 @@ export const exportImportService = {
   },
 
   /**
-   * Exporta respaldo completo en formato JSON
+   * Exporta respaldo completo en formato JSON con metadatos y carátulas
    */
-  exportToJSON(games: Game[], filename = 'GameRank_Backup.json'): void {
-    const jsonStr = JSON.stringify(games, null, 2);
+  exportToJSON(games: Game[], filename = 'GameRank_Respaldo_Completo.json'): void {
+    const payload: GameRankBackupPayload = {
+      version: '1.0',
+      exportDate: new Date().toISOString(),
+      totalGames: games.length,
+      games: games.map((g) => ({
+        ...g,
+        coverUrl: g.coverUrl || getCoverUrlForTitle(g.title) || '',
+      })),
+    };
+
+    const jsonStr = JSON.stringify(payload, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -98,29 +120,55 @@ export const exportImportService = {
   },
 
   /**
-   * Parsea un archivo JSON o CSV importado y retorna la lista normalizada de juegos
+   * Parsea un archivo JSON o CSV importado y retorna la lista normalizada de juegos, recuperando carátulas y notas.
    */
   async parseImportedFile(file: File): Promise<Game[]> {
     const text = await file.text();
 
     if (file.name.endsWith('.json')) {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) {
-        throw new Error('El archivo JSON no contiene un arreglo de juegos válido.');
+      let parsed = JSON.parse(text);
+
+      // Compatibilidad con formato envoltorio { version, games } o arreglo directo [...]
+      let rawList: any[] = [];
+      if (Array.isArray(parsed)) {
+        rawList = parsed;
+      } else if (parsed && Array.isArray(parsed.games)) {
+        rawList = parsed.games;
+      } else {
+        throw new Error('El archivo JSON no contiene una lista de videojuegos válida.');
       }
-      return parsed.map((item, idx) => ({
-        id: item.id || `imported-${Date.now()}-${idx}`,
-        rank: idx + 1,
-        title: String(item.title || item.Título || 'Sin título'),
-        platform: item.platform || item.Plataforma || 'Multiplataforma',
-        genres: Array.isArray(item.genres)
-          ? item.genres
-          : typeof item.genres === 'string'
-          ? item.genres.split(',').map((g: string) => g.trim()).filter(Boolean)
-          : ['Acción'],
-        notes: item.notes || item.Notas || '',
-        finishedDate: item.finishedDate || item['Fecha Terminado'] || '',
-      }));
+
+      if (rawList.length === 0) {
+        throw new Error('El archivo JSON no tiene juegos registrados.');
+      }
+
+      return rawList.map((item, idx) => {
+        const title = String(item.title || item.Título || item.Titulo || 'Sin título').trim();
+        const detectedCover =
+          item.coverUrl ||
+          item.cover_url ||
+          item['Carátula (URL)'] ||
+          item['Caratula_URL'] ||
+          item['Carátula'] ||
+          item['Portada'] ||
+          getCoverUrlForTitle(title) ||
+          '';
+
+        return {
+          id: item.id || `imported-${Date.now()}-${idx}`,
+          rank: idx + 1,
+          title,
+          platform: item.platform || item.Plataforma || 'Multiplataforma',
+          genres: Array.isArray(item.genres)
+            ? item.genres
+            : typeof item.genres === 'string'
+            ? item.genres.split(',').map((g: string) => g.trim()).filter(Boolean)
+            : ['Acción'],
+          notes: item.notes || item.Notas || '',
+          coverUrl: detectedCover,
+          finishedDate: item.finishedDate || item['Fecha Terminado'] || item['Fecha_Terminado'] || '',
+        };
+      });
     }
 
     if (file.name.endsWith('.csv')) {
@@ -146,6 +194,7 @@ export const exportImportService = {
             .map((g) => g.trim())
             .filter(Boolean);
           const cleanNotes = (parts[5] || '').replace(/^"|"$/g, '').trim();
+          const cleanCover = (parts[6] || '').replace(/^"|"$/g, '').trim();
 
           if (cleanTitle) {
             games.push({
@@ -155,6 +204,7 @@ export const exportImportService = {
               platform: cleanPlatform || 'Multiplataforma',
               genres: cleanGenres.length ? cleanGenres : ['Acción'],
               notes: cleanNotes,
+              coverUrl: cleanCover || getCoverUrlForTitle(cleanTitle) || '',
             });
           }
         }

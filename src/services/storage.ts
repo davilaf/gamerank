@@ -4,6 +4,7 @@ import { getCoverUrlForTitle } from './covers';
 
 const STORAGE_KEY_GAMES = 'gamerank_my_games_v1';
 const STORAGE_KEY_SETTINGS = 'gamerank_user_settings_v1';
+const STORAGE_KEY_LAST_MODIFIED = 'gamerank_games_last_modified_v1';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   geminiApiKey: '',
@@ -18,12 +19,12 @@ export const storageService = {
       const data = localStorage.getItem(STORAGE_KEY_GAMES);
       if (!data) {
         // First run: save seed games
-        this.saveGames(SEED_GAMES);
+        this.saveGames(SEED_GAMES, false);
         return SEED_GAMES;
       }
       const parsed: Game[] = JSON.parse(data);
       if (!Array.isArray(parsed) || parsed.length === 0) {
-        this.saveGames(SEED_GAMES);
+        this.saveGames(SEED_GAMES, false);
         return SEED_GAMES;
       }
       // Ensure ranks are normalized 1..N
@@ -34,19 +35,30 @@ export const storageService = {
     }
   },
 
-  saveGames(games: Game[]): void {
+  saveGames(games: Game[], updateTimestamp = true): void {
     try {
       const normalized = this.normalizeRanks(games);
       localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(normalized));
+      if (updateTimestamp) {
+        localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, new Date().toISOString());
+      }
     } catch (e) {
       console.error('Error saving games to storage:', e);
     }
   },
 
+  getLastModified(): string | null {
+    return localStorage.getItem(STORAGE_KEY_LAST_MODIFIED);
+  },
+
+  setLastModified(isoTimestamp: string): void {
+    localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, isoTimestamp);
+  },
+
   resetToSeedData(): Game[] {
     try {
       localStorage.removeItem(STORAGE_KEY_GAMES);
-      this.saveGames(SEED_GAMES);
+      this.saveGames(SEED_GAMES, true);
       return SEED_GAMES;
     } catch (e) {
       console.error('Error resetting to seed games:', e);
