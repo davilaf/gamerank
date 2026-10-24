@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { X, Swords, Hash, Plus, Check, Sparkles } from 'lucide-react';
+import { X, Swords, Hash, Plus, Check, Sparkles, Dices, Wand2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Game } from '../../types/game';
 import { GameCover } from '../common/GameCover';
 import { getCoverUrlForTitle } from '../../services/covers';
+import {
+  searchGameCoverAndInfo,
+  generateSmartImpressions,
+  POPULAR_SUGGESTED_GAMES,
+} from '../../services/gameSearch';
 
 interface AddEditGameModalProps {
   isOpen: boolean;
@@ -61,6 +66,13 @@ export function AddEditGameModal({
   const [manualRank, setManualRank] = useState<number>(1);
   const [mode, setMode] = useState<'choose' | 'manual'>('choose');
 
+  // Estados de retroalimentación para botones automáticos
+  const [isSearchingCover, setIsSearchingCover] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+
   useEffect(() => {
     if (gameToEdit) {
       setTitle(gameToEdit.title);
@@ -70,6 +82,7 @@ export function AddEditGameModal({
       setCoverUrl(gameToEdit.coverUrl || getCoverUrlForTitle(gameToEdit.title) || '');
       setManualRank(gameToEdit.rank);
       setMode('manual');
+      setFeedback(null);
     } else {
       setTitle('');
       setPlatform('Multiplataforma');
@@ -78,6 +91,7 @@ export function AddEditGameModal({
       setCoverUrl('');
       setManualRank(totalGames + 1);
       setMode('choose');
+      setFeedback(null);
     }
   }, [gameToEdit, totalGames, isOpen]);
 
@@ -96,6 +110,82 @@ export function AddEditGameModal({
       setGenres([...genres, newGenreInput.trim()]);
       setNewGenreInput('');
     }
+  };
+
+  // 1. Botón: Buscar carátula automática (Local + RAWG API online)
+  const handleSearchCover = async () => {
+    if (!title.trim()) {
+      setFeedback({
+        type: 'error',
+        text: 'Por favor, escribe primero el Título del Videojuego para buscar su carátula.',
+      });
+      return;
+    }
+
+    setIsSearchingCover(true);
+    setFeedback({
+      type: 'info',
+      text: `Buscando carátula oficial para "${title.trim()}" en la red...`,
+    });
+
+    try {
+      const result = await searchGameCoverAndInfo(title.trim());
+
+      if (result && result.coverUrl) {
+        setCoverUrl(result.coverUrl);
+        // Si no se han modificado géneros o plataforma, enriquecer con los oficiales
+        if (genres.length <= 1 && result.genres.length > 0) {
+          setGenres(result.genres);
+        }
+        if ((!platform || platform === 'Multiplataforma') && result.platform) {
+          setPlatform(result.platform);
+        }
+        setFeedback({
+          type: 'success',
+          text: `¡Carátula encontrada y aplicada con éxito!`,
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          text: `No se encontró carátula automática para "${title.trim()}". Puedes pegar una URL de imagen directamente.`,
+        });
+      }
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text: 'Error de conexión al buscar la carátula.',
+      });
+    } finally {
+      setIsSearchingCover(false);
+    }
+  };
+
+  // 2. Botón: Sugerir y autocompletar Título del Videojuego (+ portada y datos)
+  const handleSuggestGame = () => {
+    // Tomar un juego aleatorio de la lista curada de sugerencias populares
+    const randomIndex = Math.floor(Math.random() * POPULAR_SUGGESTED_GAMES.length);
+    const suggested = POPULAR_SUGGESTED_GAMES[randomIndex];
+
+    setTitle(suggested.title);
+    setPlatform(suggested.platform);
+    setGenres(suggested.genres);
+    setCoverUrl(suggested.coverUrl || getCoverUrlForTitle(suggested.title) || '');
+    setNotes(suggested.notes);
+
+    setFeedback({
+      type: 'success',
+      text: `¡Título cargado: "${suggested.title}" con carátula y notas listas!`,
+    });
+  };
+
+  // 3. Botón: Generar Impresiones / Notas personales automáticas
+  const handleGenerateNotes = () => {
+    const generated = generateSmartImpressions(title, genres);
+    setNotes(generated);
+    setFeedback({
+      type: 'success',
+      text: '¡Impresión personal generada según el género! Puedes editarla a tu gusto.',
+    });
   };
 
   const handleLaunchDuel = () => {
@@ -129,8 +219,8 @@ export function AddEditGameModal({
       <div className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden my-auto">
         {/* Cabecera */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
-          <h3 className="text-lg font-bold text-white">
-            {gameToEdit ? `Editar: ${gameToEdit.title}` : 'Añadir Nuevo Juego Terminado'}
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <span>{gameToEdit ? `Editar: ${gameToEdit.title}` : 'Añadir Nuevo Juego Terminado'}</span>
           </h3>
           <button
             type="button"
@@ -141,24 +231,66 @@ export function AddEditGameModal({
           </button>
         </div>
 
+        {/* Mensaje de retroalimentación dinámico */}
+        {feedback && (
+          <div
+            className={`mx-6 mt-4 p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition-all ${
+              feedback.type === 'success'
+                ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
+                : feedback.type === 'error'
+                ? 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+                : 'bg-purple-950/60 border-purple-500/40 text-purple-200'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {feedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              ) : feedback.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              ) : (
+                <RefreshCw className="w-4 h-4 text-purple-400 animate-spin flex-shrink-0" />
+              )}
+              <span>{feedback.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-slate-400 hover:text-white p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Formulario */}
         <div className="p-6 space-y-4 text-xs sm:text-sm">
           {/* Título */}
           <div>
-            <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
-              Título del Videojuego *
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold uppercase text-slate-400">
+                Título del Videojuego *
+              </label>
+              <button
+                type="button"
+                onClick={handleSuggestGame}
+                className="text-[11px] text-amber-300 hover:text-amber-200 font-semibold flex items-center gap-1.5 cursor-pointer bg-amber-500/15 hover:bg-amber-500/25 px-2.5 py-1 rounded-lg border border-amber-500/30 transition-all"
+                title="Autocompletar con un juego popular recomendado"
+              >
+                <Dices className="w-3.5 h-3.5 text-amber-400" />
+                <span>🎲 Llenar con juego sugerido</span>
+              </button>
+            </div>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="ej. Lies of P, Armored Core VI, Blasphemous 2..."
+              placeholder="ej. Lies of P, Black Myth: Wukong, Silent Hill 2..."
               className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
               autoFocus
             />
           </div>
 
-          {/* Carátula / Portada con vista previa */}
+          {/* Carátula / Portada con vista previa y búsqueda online */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-bold uppercase text-slate-400">
@@ -166,14 +298,22 @@ export function AddEditGameModal({
               </label>
               <button
                 type="button"
-                onClick={() => {
-                  const auto = getCoverUrlForTitle(title);
-                  if (auto) setCoverUrl(auto);
-                }}
-                className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer"
+                onClick={handleSearchCover}
+                disabled={isSearchingCover}
+                className="text-[11px] text-purple-300 hover:text-purple-200 font-semibold flex items-center gap-1.5 cursor-pointer bg-purple-500/15 hover:bg-purple-500/25 px-2.5 py-1 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50"
+                title="Busca la carátula oficial en línea por el título"
               >
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-                Buscar carátula automática
+                {isSearchingCover ? (
+                  <>
+                    <RefreshCw className="w-3 h-3 text-purple-400 animate-spin" />
+                    <span>Buscando en la red...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Buscar carátula automática</span>
+                  </>
+                )}
               </button>
             </div>
             <div className="flex gap-3 items-center p-2 rounded-xl bg-slate-950 border border-slate-800">
@@ -192,7 +332,7 @@ export function AddEditGameModal({
                   className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 text-xs font-mono truncate"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  Se detecta automáticamente por el título (o puedes pegar cualquier URL de imagen)
+                  Se busca en internet automáticamente o puedes pegar cualquier enlace de imagen directo.
                 </span>
               </div>
             </div>
@@ -280,15 +420,26 @@ export function AddEditGameModal({
             </div>
           </div>
 
-          {/* Notas */}
+          {/* Impresiones / Notas personales */}
           <div>
-            <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
-              Impresiones / Notas personales
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold uppercase text-slate-400">
+                Impresiones / Notas personales
+              </label>
+              <button
+                type="button"
+                onClick={handleGenerateNotes}
+                className="text-[11px] text-cyan-300 hover:text-cyan-200 font-semibold flex items-center gap-1.5 cursor-pointer bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1 rounded-lg border border-cyan-500/30 transition-all"
+                title="Generar reseña personal automática según el género"
+              >
+                <Wand2 className="w-3.5 h-3.5 text-cyan-400" />
+                <span>✨ Llenar notas / reseña</span>
+              </button>
+            </div>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="¿Qué te pareció? ¿Cuál fue tu jefe favorito o momento cumbre?"
+              placeholder="¿Qué te pareció? ¿Cuál fue tu jefe favorito o momento cumbre? (O pulsa el botón ✨ para autocompletar)"
               rows={2}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs"
             />
