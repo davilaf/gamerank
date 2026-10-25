@@ -309,18 +309,22 @@ export function getRecommendations(finishedGames: Game[]): Recommendation[] {
  */
 async function resolveActiveGeminiModel(apiKey: string): Promise<string> {
   const PREFERRED_ORDER = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-4-argon',
     'gemini-2.5-flash',
-    'gemini-2.0-flash',
     'gemini-2.5-flash-lite',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash-latest',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
     'gemini-1.5-pro',
   ];
 
   try {
     const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(listUrl, { signal: controller.signal });
     clearTimeout(timeout);
 
@@ -332,7 +336,9 @@ async function resolveActiveGeminiModel(apiKey: string): Promise<string> {
           (m) =>
             m.supportedGenerationMethods?.includes('generateContent') &&
             !m.name.includes('vision') &&
-            !m.name.includes('embedding')
+            !m.name.includes('embedding') &&
+            !m.name.includes('tts') &&
+            !m.name.includes('image')
         );
 
         for (const preferred of PREFERRED_ORDER) {
@@ -356,8 +362,8 @@ async function resolveActiveGeminiModel(apiKey: string): Promise<string> {
     console.warn('[Gemini] No se pudo listar modelos dinámicamente:', err);
   }
 
-  // Modelo predeterminado actual
-  return 'gemini-2.5-flash';
+  // Modelo insignia predeterminado actual de alta velocidad y compatibilidad general
+  return 'gemini-3.8-flash';
 }
 
 /**
@@ -396,10 +402,15 @@ Responde ÚNICAMENTE con un JSON válido con la siguiente estructura (sin markdo
   const candidateModels = Array.from(
     new Set([
       detectedModel,
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-4-argon',
       'gemini-2.5-flash',
-      'gemini-2.0-flash',
       'gemini-2.5-flash-lite',
-      'gemini-1.5-flash-latest',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
       'gemini-1.5-pro',
     ])
   );
@@ -426,6 +437,7 @@ Responde ÚNICAMENTE con un JSON válido con la siguiente estructura (sin markdo
         const errorData = await response.json().catch(() => ({}));
         // Si el modelo específico arrojó 404 (modelo no encontrado o descontinuado), probar el siguiente candidato
         if (response.status === 404) {
+          console.warn(`[Gemini] Modelo ${modelCode} no disponible (404), probando siguiente modelo...`);
           lastError = new Error(`Modelo ${modelCode} no disponible (404)`);
           continue;
         }
@@ -433,12 +445,22 @@ Responde ÚNICAMENTE con un JSON válido con la siguiente estructura (sin markdo
       }
 
       const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parts = (data.candidates?.[0]?.content?.parts as Array<{ text?: string; thought?: boolean }>) || [];
+      // En modelos con "thinking" (Gemini 3.8 Flash, etc.), las primeras partes pueden ser pensamientos ("thought: true").
+      // Buscamos la parte que contiene el texto de salida final (sin flag thought, o la última con texto).
+      const contentPart = parts.find((p) => !p.thought && p.text) || [...parts].reverse().find((p) => p.text);
+      const text = contentPart?.text;
       if (!text) {
-        throw new Error('No se recibió respuesta de texto del modelo Gemini.');
+        throw new Error('No se recibió texto en la respuesta del modelo Gemini.');
       }
 
-      const parsed = JSON.parse(text);
+      // Limpiar posibles bloques markdown ```json ... ```
+      let cleanJson = text.trim();
+      if (cleanJson.startsWith('```')) {
+        cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      }
+
+      const parsed = JSON.parse(cleanJson);
       if (!Array.isArray(parsed)) {
         throw new Error('El formato devuelto por la IA no fue una lista.');
       }
@@ -463,5 +485,10 @@ Responde ÚNICAMENTE con un JSON válido con la siguiente estructura (sin markdo
     }
   }
 
-  throw lastError || new Error('No se pudo conectar con ningún modelo compatible de Gemini API.');
+  throw (
+    lastError ||
+    new Error(
+      'No se pudo conectar con ningún modelo de Gemini (se verificaron gemini-3.8-flash, gemini-3.5-flash-lite, etc.). Por favor revisa que tu clave API esté activa en Google AI Studio.'
+    )
+  );
 }
