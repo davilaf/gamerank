@@ -1,4 +1,5 @@
 import { Game, Recommendation } from '../types/game';
+import { getCoverUrlForTitle } from './covers';
 
 export interface RawgGameResult {
   name: string;
@@ -304,7 +305,64 @@ export function getRecommendations(finishedGames: Game[]): Recommendation[] {
 }
 
 /**
- * Consulta la API de Google Gemini para obtener 3-5 recomendaciones personalizadas en tiempo real
+ * Detecta y resuelve dinámicamente un modelo activo y compatible con la clave API del usuario
+ */
+async function resolveActiveGeminiModel(apiKey: string): Promise<string> {
+  const PREFERRED_ORDER = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro',
+  ];
+
+  try {
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(listUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      const modelsList = data.models as Array<{ name: string; supportedGenerationMethods?: string[] }>;
+      if (Array.isArray(modelsList) && modelsList.length > 0) {
+        const supported = modelsList.filter(
+          (m) =>
+            m.supportedGenerationMethods?.includes('generateContent') &&
+            !m.name.includes('vision') &&
+            !m.name.includes('embedding')
+        );
+
+        for (const preferred of PREFERRED_ORDER) {
+          const match = supported.find((m) => m.name.endsWith(preferred) || m.name === `models/${preferred}`);
+          if (match) {
+            return match.name.replace(/^models\//, '');
+          }
+        }
+
+        const anyFlash = supported.find((m) => m.name.includes('flash'));
+        if (anyFlash) {
+          return anyFlash.name.replace(/^models\//, '');
+        }
+
+        if (supported.length > 0) {
+          return supported[0].name.replace(/^models\//, '');
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Gemini] No se pudo listar modelos dinámicamente:', err);
+  }
+
+  // Modelo predeterminado actual
+  return 'gemini-2.5-flash';
+}
+
+/**
+ * Consulta la API de Google Gemini para obtener 3-5 recomendaciones personalizadas en tiempo real.
+ * Cuenta con detección automática de modelos y tolerancia a fallos ante modelos deprecados.
  */
 export async function fetchGeminiRecommendations(
   apiKey: string,
@@ -334,44 +392,76 @@ Responde ÚNICAMENTE con un JSON válido con la siguiente estructura (sin markdo
   }
 ]`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`;
+  const detectedModel = await resolveActiveGeminiModel(apiKey);
+  const candidateModels = Array.from(
+    new Set([
+      detectedModel,
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro',
+    ])
+  );
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        responseMimeType: 'application/json',
-      },
-    }),
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`Error de Gemini API (${response.status}): ${errorData.error?.message || response.statusText}`);
+  for (const modelCode of candidateModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelCode}:generateContent?key=${apiKey.trim()}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        // Si el modelo específico arrojó 404 (modelo no encontrado o descontinuado), probar el siguiente candidato
+        if (response.status === 404) {
+          lastError = new Error(`Modelo ${modelCode} no disponible (404)`);
+          continue;
+        }
+        throw new Error(`Error de Gemini API (${response.status}): ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error('No se recibió respuesta de texto del modelo Gemini.');
+      }
+
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) {
+        throw new Error('El formato devuelto por la IA no fue una lista.');
+      }
+
+      return parsed.map((item, idx) => ({
+        id: `gemini-rec-${Date.now()}-${idx}`,
+        title: item.title,
+        genres: Array.isArray(item.genres) ? item.genres : ['Acción', 'Aventura'],
+        platform: item.platform || 'Multiplataforma',
+        whyYouWillLoveIt: item.whyYouWillLoveIt,
+        connectedWith: Array.isArray(item.connectedWith) ? item.connectedWith : [],
+        matchScore: item.matchScore || 95,
+        coverUrl: getCoverUrlForTitle(item.title) || undefined,
+        source: 'gemini' as const,
+      }));
+    } catch (err: any) {
+      if (err.message?.includes('404')) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
   }
 
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('No se recibió respuesta válida del modelo Gemini.');
-  }
-
-  const parsed = JSON.parse(text);
-  if (!Array.isArray(parsed)) {
-    throw new Error('El formato devuelto por la IA no fue una lista.');
-  }
-
-  return parsed.map((item, idx) => ({
-    id: `gemini-rec-${Date.now()}-${idx}`,
-    title: item.title,
-    genres: Array.isArray(item.genres) ? item.genres : ['Acción', 'Aventura'],
-    platform: item.platform || 'Multiplataforma',
-    whyYouWillLoveIt: item.whyYouWillLoveIt,
-    connectedWith: Array.isArray(item.connectedWith) ? item.connectedWith : [],
-    matchScore: item.matchScore || 95,
-    source: 'gemini' as const,
-  }));
+  throw lastError || new Error('No se pudo conectar con ningún modelo compatible de Gemini API.');
 }
